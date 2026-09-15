@@ -182,3 +182,103 @@ for lookback in lookbacks:
         n_table.loc[lookback,horizon] = len(df[[f"momentum_{lookback}", f"future_return_{horizon}"]].dropna())
 print("Momentum n Table:")
 print(n_table)
+
+# 1. Pearson vs Spearman:
+# M20-F20 的 Pearson 为 0.060，Spearman 为 0.056，
+# 两者方向与大小接近，说明这一弱正相关并不完全依赖极端值
+
+# 2. Long-horizon reversal:
+# M60-F60 的 Pearson 为 -0.186，Spearman 为 -0.084，
+# 两者均为负，但 Spearman 绝对值明显更小，
+# 说明长期反转现象仍存在，但极端值可能放大了 Pearson 的负相关。
+
+# 3. Metric disagreement:
+# M20-F60 的 Pearson 为负而 Spearman 略正，
+# 且两者绝对值都很小，因此该组合不存在稳定的方向性证据。
+#
+# 4. Naive t-stat:
+# M20-F20 的 naive t-stat 约为 1.63；
+# M60-F60 的 naive t-stat 约为 -4.84。
+# t-stat 不只由相关系数决定，还受到有效样本数 n 的影响。
+#
+# 5. Limitation:
+# 由于未来收益窗口大量重叠，观测并非独立，
+# 因此这些 naive t-stat 可能高估统计证据，
+# 不能直接作为正式显著性结论。
+
+# 6. IC terminology:
+# 当前分析属于单股票跨时间的 Pearson / Spearman correlation，
+# 并不是标准横截面 IC / Rank IC。
+# 真正的横截面 IC 将在多股票阶段计算。
+
+df["year"] = df["date"].dt.year
+print(df[["date", "year"]].head())
+print(df["year"].value_counts().sort_index())
+years = sorted(df["year"].unique())
+
+for year in years: 
+     yearly_data = df[df["year"] == year]
+     r = yearly_data["momentum_20"].corr(yearly_data["future_return_20"])
+     print(year, r)
+for year in years: 
+     yearly_data = df[df["year"] == year]
+     r = yearly_data["momentum_60"].corr(yearly_data["future_return_60"])
+     print(year, r)
+for year in years:
+    yearly_data = df[df["year"] == year]
+    pair = yearly_data[["momentum_60", "future_return_60"]].dropna()
+    n = len(pair)
+    r = pair["momentum_60"].corr(pair["future_return_60"])
+    print(year, "n =", n, "r =", r)
+
+index_df = pd.read_csv("03-a股多因子回测/data/processed/csi300_clean.csv",parse_dates=["date"])
+index_df["csi300_return_120"] = (index_df["close"].pct_change(120))
+index_df["csi300_ma20"] = (index_df["close"].rolling(20).mean())
+index_df["csi300_ma120"] = (index_df["close"].rolling(120).mean())
+index_df = index_df[["date","close","csi300_return_120","csi300_ma20","csi300_ma120"]].copy()
+
+
+merged_df = pd.merge(df,index_df,on="date",how="inner")
+merged_df["regime"] = pd.NA
+merged_df.loc[merged_df["csi300_return_120"] > 0,"regime"] = "Up"
+merged_df.loc[merged_df["csi300_return_120"] < 0,"regime"] = "Down"
+print(merged_df["regime"].value_counts(dropna=False))
+
+merged_df["regime_ma"] = pd.NA
+merged_df.loc[merged_df["csi300_ma20"] > merged_df["csi300_ma120"],"regime_ma"] = "Up"
+merged_df.loc[merged_df["csi300_ma20"] < merged_df["csi300_ma120"],"regime_ma"] = "Down"
+print(merged_df["regime_ma"].value_counts(dropna=False))
+
+for regime in ["Up", "Down"]:
+    regime_data = merged_df[merged_df["regime"] == regime]
+    pair = regime_data[["momentum_60", "future_return_60"]].dropna()
+    n = len(pair)
+    r = pair["momentum_60"].corr(pair["future_return_60"])
+    print("regime =", regime,"n =", n,"r =", r)
+
+for regime in ["Up", "Down"]:
+    regime_data = merged_df[merged_df["regime_ma"] == regime]
+    pair = regime_data[["momentum_60", "future_return_60"]].dropna()
+    n = len(pair)
+    r = pair["momentum_60"].corr(pair["future_return_60"])
+    print("regime_ma =", regime,"n =", n,"r =", r)
+
+print(pd.crosstab(merged_df["regime"],merged_df["regime_ma"]))
+agreement = (merged_df["regime"]== merged_df["regime_ma"]).mean()
+print("Regime agreement =", agreement)
+
+windows = [40, 50, 60, 70, 80]
+
+sensitivity_table = pd.DataFrame(
+    index=windows,
+    columns=windows,
+    dtype=float
+)
+
+for lookback in windows:
+    momentum = df["close"].pct_change(lookback)
+    for horizon in windows:
+        future_return = (df["close"].pct_change(horizon).shift(-horizon))
+        r = momentum.corr(future_return)
+        sensitivity_table.loc[lookback, horizon] = r
+print(sensitivity_table)
