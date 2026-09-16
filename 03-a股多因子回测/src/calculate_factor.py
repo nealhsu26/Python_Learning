@@ -268,12 +268,7 @@ agreement = (merged_df["regime"]== merged_df["regime_ma"]).mean()
 print("Regime agreement =", agreement)
 
 windows = [40, 50, 60, 70, 80]
-
-sensitivity_table = pd.DataFrame(
-    index=windows,
-    columns=windows,
-    dtype=float
-)
+sensitivity_table = pd.DataFrame(index=windows,columns=windows,dtype=float)
 
 for lookback in windows:
     momentum = df["close"].pct_change(lookback)
@@ -282,3 +277,51 @@ for lookback in windows:
         r = momentum.corr(future_return)
         sensitivity_table.loc[lookback, horizon] = r
 print(sensitivity_table)
+
+
+# 本阶段对东山精密的中长期动量/反转现象进行了稳健性检验。
+#
+# 1. 时间稳健性：
+# M60-F60 在 2023、2024、2025、2026 四个年度子样本中的 Pearson相关系数均为负，说明长期反转关系并非完全由某一个年份驱动
+# 但由于 60 日窗口高度重叠，且 2023、2026 为不完整年度，各年度结果不能视为完全独立的统计证据。
+#
+# 2. 市场环境稳健性：
+# 使用沪深300构造了两种市场环境定义：
+# V1：过去120日指数收益率正/负；
+# V2：MA20 高于/低于 MA120。
+# 在两种定义下，Up regime 中的 M60-F60 Pearson 分别约为-0.305 和 -0.332，均表现出较明显的反转关系。
+# 但在 Down regime 中，相关系数分别约为 +0.160 和 +0.015，方向和强度并不稳定。
+# 因此，目前只能认为上涨市场环境中的长期反转现象具有一定稳健性，不能认为下跌市场存在稳定的动量效应
+# 两种 regime 定义对 86.68% 的交易日给出了相同分类，说明二者高度相关，但并非完全相同。
+#
+# 3. 参数稳健性：
+# 对 40、50、60、70、80 日 lookback 和 future horizon构成的 5×5 参数区域进行检验，25 个 Pearson 相关系数全部为负。
+# 因此，M60-F60 的负相关并不是只存在于 60×60 这一单独参数点，而是在中长期参数区域内具有较一致的反转特征。
+
+df["volatility_20"] = (df["return"].rolling(20).std())
+print(df[["date", "return", "volatility_20"]].head(25))
+df["volatility_5"] = (df["return"].rolling(5).std())
+df["volatility_60"] = (df["return"].rolling(60).std())
+print(df[["date","volatility_5","volatility_20","volatility_60" ]].tail(20))
+
+import numpy as np
+
+df["volatility_5_ann"] = df["volatility_5"] * np.sqrt(252)
+df["volatility_20_ann"] = df["volatility_20"] * np.sqrt(252)
+df["volatility_60_ann"] = df["volatility_60"] * np.sqrt(252)
+print(df[["date", "volatility_5_ann", "volatility_20_ann", "volatility_60_ann"]].tail())
+print(df["volatility_20_ann"].describe())
+print(df.nlargest(10, "volatility_20_ann")[["date", "close", "volatility_20_ann"]])
+print(df.nsmallest(10, "volatility_20_ann")[["date", "close", "volatility_20_ann"]])
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 5))
+plt.plot(df["date"], df["volatility_20_ann"])
+plt.xlabel("Date")
+plt.ylabel("Annualized Volatility")
+plt.title("20-Day Annualized Volatility")
+plt.grid(alpha=0.3)
+plt.show()
+
+print(df[["volatility_5_ann", "volatility_20_ann", "volatility_60_ann"]].std())
