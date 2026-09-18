@@ -325,3 +325,83 @@ plt.grid(alpha=0.3)
 plt.show()
 
 print(df[["volatility_5_ann", "volatility_20_ann", "volatility_60_ann"]].std())
+
+# 本阶段构造了东山精密的 5 日、20 日和 60 日滚动波动率因子，
+# 并使用 sqrt(252) 将日收益率标准差转换为年化波动率。
+#
+# 波动率衡量的是过去一段时间内日收益率的离散程度，而不是价格涨跌方向。
+# 不同滚动窗口反映不同时间尺度的市场状态：短窗口对新信息更加敏感，
+# 长窗口则更加平滑和稳定。
+#
+# 样本中 20 日年化波动率均值约为 60.6%，中位数约为 60.7%，
+# 最低约为 20.6%，最高约为 116.5%，说明波动水平具有明显的时变特征。
+#
+# 高波动和低波动日期明显集中出现，体现出 volatility clustering
+# （波动率聚集）现象，而不是每天独立地在高低波动之间随机切换。
+#
+# volatility 指标自身的标准差满足：
+# Vol5 > Vol20 > Vol60，
+# 说明短窗口响应更快但变化更剧烈，长窗口响应更慢但更加稳定。
+#
+# 当前阶段只完成了 volatility factor 的构造和描述性分析，
+# 尚不能判断高波动率是否对应更高或更低的未来收益。
+# 下一阶段需要通过 future return、correlation、quantile grouping
+# 和 IC 等方法正式检验 volatility 与未来收益之间的关系
+
+# Research Finding:
+# Rolling volatility factors were constructed using 5-, 20-, and 60-day
+# windows and annualized using the square-root-of-time convention.
+#
+# Volatility varies substantially over time and exhibits clear clustering,
+# with high- and low-volatility periods occurring persistently rather than
+# independently across days.
+#
+# Shorter volatility windows are more responsive but less stable, while
+# longer windows produce smoother estimates. The standard deviation of the
+# volatility series decreases from Vol5 to Vol20 to Vol60.
+#
+# At this stage, volatility is only a constructed candidate factor.
+# Whether it contains information about future returns will be tested in D6.
+
+vol20_f20_pearson = df["volatility_20_ann"].corr(df["future_return_20"])
+vol20_f20_spearman = df["volatility_20_ann"].corr(df["future_return_20"], method="spearman")
+print("Vol20-F20 Pearson =", vol20_f20_pearson)
+print("Vol20-F20 Spearman =", vol20_f20_spearman)
+vol_data = df[["volatility_20_ann", "future_return_20"]].dropna().copy()
+vol_data["vol_group"] = pd.qcut(vol_data["volatility_20_ann"], 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
+vol_group_return = vol_data.groupby("vol_group", observed=False)["future_return_20"].mean()
+vol_group_count = vol_data.groupby("vol_group", observed=False)["future_return_20"].count()
+print(vol_group_return)
+print(vol_group_count)
+vol_spread = vol_group_return["Q5"] - vol_group_return["Q1"]
+print("Q5-Q1 spread =", vol_spread)
+windows = [5, 20, 60]
+horizons = [5, 20, 60]
+vol_pearson_table = pd.DataFrame(index=windows, columns=horizons, dtype=float)
+for window in windows:
+    volatility = df["return"].rolling(window).std() * np.sqrt(252)
+    for horizon in horizons:
+        future_return = df["close"].pct_change(horizon).shift(-horizon)
+        vol_pearson_table.loc[window, horizon] = volatility.corr(future_return)
+print(vol_pearson_table)
+vol_spearman_table = pd.DataFrame(index=windows, columns=horizons, dtype=float)
+for window in windows:
+    volatility = df["return"].rolling(window).std() * np.sqrt(252)
+    for horizon in horizons:
+        future_return = df["close"].pct_change(horizon).shift(-horizon)
+        vol_spearman_table.loc[window, horizon] = volatility.corr(future_return, method="spearman")
+print(vol_spearman_table)
+
+df["future_return_60"] = df["close"].pct_change(60).shift(-60)
+vol60_data = df[["volatility_20_ann", "future_return_60"]].dropna().copy()
+vol60_data["vol_group"] = pd.qcut(vol60_data["volatility_20_ann"], 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
+vol60_group_return = vol60_data.groupby("vol_group", observed=False)["future_return_60"].mean()
+vol60_group_count = vol60_data.groupby("vol_group", observed=False)["future_return_60"].count()
+print(vol60_group_return)
+print(vol60_group_count)
+print("Q5-Q1 spread =", vol60_group_return["Q5"] - vol60_group_return["Q1"])
+df["year"] = df["date"].dt.year
+for year in sorted(df["year"].unique()):
+    pair = df[df["year"] == year][["volatility_20_ann", "future_return_60"]].dropna()
+    r = pair["volatility_20_ann"].corr(pair["future_return_60"], method="spearman")
+    print("year =", year, "n =", len(pair), "Spearman =", r)
